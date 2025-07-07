@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.16.1", features = ["dynamic_linking"] }
+bevy = { version = "0.16.1" }
 bevy_asset_loader = "0.23.0"
 bevy_panorbit_camera = "0.27.0"
 [profile.dev]
