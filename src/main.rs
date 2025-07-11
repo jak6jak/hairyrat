@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy::scene::SceneInstanceReady;
 use bevy_asset_loader::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use std::time::Duration;
@@ -10,6 +9,11 @@ struct Animations {
     node_indices: Vec<AnimationNodeIndex>,
 }
 
+#[derive(Component)]
+struct RatsSpawned;
+
+#[derive(Component)]
+struct Rat;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, PanOrbitCameraPlugin))
@@ -20,7 +24,14 @@ fn main() {
                 .load_collection::<RatModels>()
                 .load_collection::<WorldMaterial>(),
         )
-        .add_systems(OnEnter(MyStates::Next), (show_model))
+        .add_systems(OnEnter(MyStates::Next), show_model)
+        .add_systems(
+            Update,
+            (play_animation_when_ready.run_if(in_state(MyStates::Next)),
+            //test_system.run_if(in_state(MyStates::Next)),)
+            )
+        )
+        //.add_observer(play_animation_when_ready)
         .run();
 }
 
@@ -55,51 +66,49 @@ fn show_model(
 
     // Create a component that stores a reference to our animation.
     commands.insert_resource(Animations {
-        graph: graph_handle,
+        graph: graph_handle.clone(),
         node_indices: vec![index],
     });
 
     let spawn_base = commands
-        .spawn((Transform::default(), Visibility::default()))
+        .spawn((Transform::default(), Visibility::default(), Rat))
         .id();
-    for rat_x in 0..100 {
-        for rat_y in 0..100 {
-            commands.entity(spawn_base).with_children(|builder| {
-                builder
-                    .spawn((
-                        SceneRoot(rat_models.rat.clone()),
-                        Transform::from_xyz((rat_x as f32 / 10.0), (rat_y as f32 / 10.0), 0.0)
-                            .with_scale(Vec3::splat(1.0)),
-                    ))
-                    .observe(play_animation_when_ready);
-            });
-        }
-    }
+
+    let rat_handle = rat_models.rat.clone();
+    commands.spawn_batch((0..10).flat_map(|x| (0..10).map(move |y| (x, y))).map(
+        move |(_x, _y)| {
+            (
+                SceneRoot(rat_handle.clone()),
+                Transform::from_xyz(_x as f32 / 10.0, _y as f32 / 10.0, 0.0)
+                    .with_scale(Vec3::splat(1.0)),
+                AnimationGraphHandle(graph_handle.clone()),
+                //AnimationTransitions::new(),
+                ChildOf(spawn_base),
+            )
+        },
+    ));
 }
 
 fn play_animation_when_ready(
-    trigger: Trigger<SceneInstanceReady>,
     animations: Res<Animations>,
     mut commands: Commands,
-    children: Query<&Children>,
-    mut player: Query<(Entity, &mut AnimationPlayer)>,
+    rats: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
 ) {
-    for child in children.iter_descendants(trigger.target()) {
-        if let Ok((entity, mut player)) = player.get_mut(child) {
-            let mut animation_transitions = AnimationTransitions::new();
-            let playing_animation = animation_transitions
-                .play(
-                    &mut player,
-                    animations.node_indices[0],
-                    Duration::from_millis(15),
-                )
-                .repeat();
-            commands
-                .entity(entity)
-                .insert(AnimationGraphHandle(animations.graph.clone()))
-                .insert(animation_transitions);
-            break;
-        }
+    for (entity, mut player) in rats {
+        eprintln!("{entity}");
+        let mut animation_transitions = AnimationTransitions::new();
+        animation_transitions
+            .play(
+                &mut player,
+                animations.node_indices[0],
+                Duration::from_millis(15),
+            )
+            .repeat();
+
+        commands
+            .entity(entity)
+           .insert(AnimationGraphHandle(animations.graph.clone()))
+           .insert(animation_transitions);
     }
 }
 
