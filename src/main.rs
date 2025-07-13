@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use std::time::Duration;
+use iyes_perf_ui::prelude::*;
+
 
 #[derive(Resource)]
 struct Animations {
@@ -17,6 +19,12 @@ struct Rat;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, PanOrbitCameraPlugin))
+        .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin)
+        .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
+        .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
+
+        .add_plugins(PerfUiPlugin)
         .init_state::<MyStates>()
         .add_loading_state(
             LoadingState::new(MyStates::AssetLoading)
@@ -41,7 +49,7 @@ fn show_model(
     mut graphs: ResMut<Assets<AnimationGraph>>,
     env: Res<WorldMaterial>,
 ) {
-    // Spawn the scene directly using the loaded handle
+    commands.spawn(PerfUiAllEntries::default());
 
     // Also spawn a camera to view the model
     commands.spawn((
@@ -75,7 +83,7 @@ fn show_model(
         .id();
 
     let rat_handle = rat_models.rat.clone();
-    commands.spawn_batch((0..10).flat_map(|x| (0..10).map(move |y| (x, y))).map(
+    commands.spawn_batch((0..1).flat_map(|x| (0..1).map(move |y| (x, y))).map(
         move |(_x, _y)| {
             (
                 SceneRoot(rat_handle.clone()),
