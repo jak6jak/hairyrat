@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 use std::time::Duration;
 use iyes_perf_ui::prelude::*;
 
@@ -23,7 +24,8 @@ fn main() {
         .add_plugins(bevy::diagnostic::EntityCountDiagnosticsPlugin)
         .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
-
+        .add_plugins(EguiPlugin::default())
+        .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(PerfUiPlugin)
         .init_state::<MyStates>()
         .add_loading_state(
@@ -82,8 +84,8 @@ fn show_model(
         .spawn((Transform::default(), Visibility::default(), Rat))
         .id();
 
-    let rat_handle = rat_models.rat.clone();
-    commands.spawn_batch((0..1).flat_map(|x| (0..1).map(move |y| (x, y))).map(
+    let rat_handle = rat_models.rat_lod0.clone();
+    commands.spawn_batch((0..50).flat_map(|x| (0..50).map(move |y| (x, y))).map(
         move |(_x, _y)| {
             (
                 SceneRoot(rat_handle.clone()),
@@ -122,16 +124,20 @@ fn play_animation_when_ready(
 
 #[derive(AssetCollection, Resource)]
 struct RatModels {
-    #[asset(path = "blackrat_free_glb\\blackrat.glb#Scene0")]
+    #[asset(path = "blackrat_free_glb/blackrat.glb#Scene0")]
     rat: Handle<Scene>,
-    #[asset(path = "blackrat_free_glb\\blackrat.glb#Animation1")]
+    #[asset(path = "blackrat_furless/rat_without_furlod2.glb#Scene0")]
+    rat_lod0: Handle<Scene>,
+    #[asset(path = "blackrat_furless/rat_without_furlod2.glb#Animation1")]
+    rat_lod0_animation: Handle<Scene>,
+    #[asset(path = "blackrat_free_glb/blackrat.glb#Animation1")]
     animation_clip: Handle<AnimationClip>,
 }
 #[derive(AssetCollection, Resource)]
 struct WorldMaterial {
-    #[asset(path = "EnviromentMaps\\pisa_diffuse_rgb9e5_zstd.ktx2")]
+    #[asset(path = "EnviromentMaps/pisa_diffuse_rgb9e5_zstd.ktx2")]
     diffuse_map: Handle<Image>,
-    #[asset(path = "EnviromentMaps\\pisa_specular_rgb9e5_zstd.ktx2")]
+    #[asset(path = "EnviromentMaps/pisa_specular_rgb9e5_zstd.ktx2")]
     specular_map: Handle<Image>,
 }
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
