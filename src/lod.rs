@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_inspector_egui::egui::debug_text::print;
 use std::time::Duration;
 use std::marker::PhantomData;
 
@@ -137,9 +138,9 @@ pub fn apply_lod_updates<T: LODLevel, E: LODEntity>(
     animation_query: Query<Entity, With<AnimationPlayer>>,
 ) {
     for (_entity, lod, mut lod_timer, mut visibility, children) in entity_query.iter_mut() {
-        if budget.current_operations >= config.max_operations_per_frame {
-            break;
-        }
+        // if budget.current_operations >= config.max_operations_per_frame {
+        //     break;
+        // }
 
         lod_timer.timer.tick(time.delta());
 
@@ -149,19 +150,23 @@ pub fn apply_lod_updates<T: LODLevel, E: LODEntity>(
         } else {
             Visibility::Hidden
         };
-
         // Handle animation components on child entities
         for child in children.iter() {
-            if animation_query.contains(child) {
+            if let Ok(_) = animation_query.get(child) {
+                println!("Child {:?} has AnimationPlayer, LOD: {:?}, needs_animation: {}", 
+                         child, lod, lod.needs_animation());
+                
                 if !lod.needs_animation() {
                     // Remove animation components for LOD levels that don't need them
+                    println!("Removing animation components from entity {:?}", child);
                     commands.entity(child).remove::<AnimationPlayer>();
                     commands.entity(child).remove::<AnimationTransitions>();
                     budget.current_operations += 1;
-                } else if lod.needs_animation() {
-                    // Mark child entities that need animation restart
-                    commands.entity(child).insert(NeedsAnimationRestart);
                 }
+            } else if lod.needs_animation() {
+                // Child doesn't have animation but should - mark for restart
+                println!("Child {:?} needs animation restart, LOD: {:?}", child, lod);
+                commands.entity(child).insert(NeedsAnimationRestart);
             }
         }
 

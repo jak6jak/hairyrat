@@ -152,13 +152,15 @@ impl LODStrategy for VATLODStrategy {
     }
 }
 
-// Mesh Swap LOD Strategy
+// Mesh Swap LOD Strategy - Enhanced to support both meshes and scenes
 pub struct MeshSwapLODStrategy;
 
 #[derive(Resource)]
 pub struct MeshSwapLODConfig {
     pub mesh_handles: Vec<Handle<Mesh>>,
     pub material_handles: Vec<Handle<StandardMaterial>>,
+    // Add scene support for complete model swapping
+    pub scene_handles: Vec<Handle<Scene>>,
 }
 
 impl Default for MeshSwapLODConfig {
@@ -166,6 +168,7 @@ impl Default for MeshSwapLODConfig {
         Self {
             mesh_handles: Vec::new(),
             material_handles: Vec::new(),
+            scene_handles: Vec::new(),
         }
     }
 }
@@ -173,6 +176,7 @@ impl Default for MeshSwapLODConfig {
 #[derive(Component, Default)]
 pub struct MeshSwapLODData {
     pub current_mesh_index: usize,
+    pub current_scene_index: usize,
 }
 
 impl LODStrategy for MeshSwapLODStrategy {
@@ -189,7 +193,19 @@ impl LODStrategy for MeshSwapLODStrategy {
     ) {
         let level_index = to_level as usize;
         
-        if level_index < config.mesh_handles.len() {
+        // Prioritize scene swapping if scene handles are available
+        if !config.scene_handles.is_empty() && level_index < config.scene_handles.len() {
+            component_data.current_scene_index = level_index;
+            
+            // Swap scene
+            if let Some(scene) = config.scene_handles.get(level_index) {
+                commands.entity(entity).insert(SceneRoot(scene.clone()));
+            }
+            
+            commands.entity(entity).insert(Visibility::Visible);
+        }
+        // Fall back to mesh swapping if no scenes available
+        else if level_index < config.mesh_handles.len() {
             component_data.current_mesh_index = level_index;
             
             // Swap mesh

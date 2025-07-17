@@ -3,13 +3,14 @@ mod lod_system;
 
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
+use bevy_inspector_egui::egui::debug_text::print;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use std::time::Duration;
 use iyes_perf_ui::prelude::*;
 
 // Import the new LOD system
 use lod_system::prelude::*;
-use lod_system::strategies::AnimationLODData;
+use lod_system::strategies::{AnimationLODData, MeshSwapLODConfig, MeshSwapLODData};
 
 #[derive(Resource)]
 struct Animations {
@@ -17,8 +18,9 @@ struct Animations {
     node_indices: Vec<AnimationNodeIndex>,
 }
 
+// Rat entity marker
 #[derive(Component)]
-struct Rat;
+pub struct Rat;
 
 fn main() {
     App::new()
@@ -28,15 +30,9 @@ fn main() {
             // Performance UI plugin
             iyes_perf_ui::PerfUiPlugin,
         ))
-        // Initialize LOD levels resource early
-        .insert_resource(LODLevels::<Rat>::new(vec![
-            LODLevel::new(0, 0.0, 8.0, 1.0 / 60.0),      // High - full animation
-            LODLevel::new(1, 8.0, 15.0, 1.0 / 30.0),     // Medium - reduced rate
-            LODLevel::new(2, 15.0, 25.0, 1.0 / 10.0),    // Low - very reduced rate
-            LODLevel::new(3, 25.0, f32::MAX, 1.0),       // Culled
-        ]))
-        // Use the new generic LOD system with Animation strategy
-        .add_plugins(LODPlugin::<Rat, AnimationLODStrategy>::default())
+        // Use the strategy-based LOD system with MeshSwapLODStrategy
+        .add_plugins(LODPlugin::<Rat, MeshSwapLODStrategy>::default())
+        .insert_resource(LODLevels::<Rat>::new(create_standard_lod_levels()))
         .init_state::<AppState>()
         .add_loading_state(
             LoadingState::new(AppState::Loading)
@@ -50,6 +46,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                setup_initial_animations,
                 handle_animation_lod,
                 debug_lod_stats,
             ).run_if(in_state(AppState::InGame))
@@ -64,6 +61,26 @@ fn setup_scene(
     env: Res<EnvironmentAssets>,
 ) {
     commands.spawn(PerfUiAllEntries::default());
+
+    // Setup MeshSwap LOD configuration with actual scene handles
+    let mesh_swap_config = MeshSwapLODConfig {
+        mesh_handles: vec![
+            // Leave empty since we're using scenes instead
+        ],
+        material_handles: vec![
+            // Leave empty since materials come with scenes
+        ],
+        scene_handles: vec![
+            // Level 0: High quality furry rat
+            rat_assets.rat.clone(),
+            // Level 1: Medium quality - use furless rat
+            rat_assets.rat_lod0.clone(),
+            // Level 2: Low quality - use furless rat again
+            rat_assets.rat_lod0.clone(),
+            // Level 3: Hidden (will be handled by visibility)
+        ],
+    };
+    commands.insert_resource(mesh_swap_config);
 
     // Camera setup
     commands.spawn((
@@ -83,31 +100,68 @@ fn setup_scene(
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, -0.5, 0.0)),
     ));
 
-    // Setup animation
+    // Setup animation - use animation from the main animated GLB file
     let (graph, index) = AnimationGraph::from_clip(rat_assets.animation_clip.clone());
     let graph_handle = graphs.add(graph);
+    let spawn_base = commands
+        .spawn((Transform::default(), Visibility::default(), Rat))
+        .id();
+
 
     commands.insert_resource(Animations {
         graph: graph_handle.clone(),
         node_indices: vec![index],
     });
 
-    // Spawn rats with the new LOD system
-    let rat_scene = rat_assets.rat_lod0.clone();
+    // Spawn rats with strategy-based LOD system
+    // The MeshSwapLODStrategy will handle swapping between scenes based on distance
+    let high_quality_scene = rat_assets.rat.clone();
+    
+    let lod_levels = create_standard_lod_levels();
+    let initial_lod = lod_levels[0]; // Start with highest quality
+    
     commands.spawn_batch((0..50).flat_map(|x| (0..50).map(move |y| (x, y))).map(
         move |(x, y)| {
+            // Start with high quality scene for all entities
+            // The LOD system will swap to appropriate scenes based on distance
             (
-                SceneRoot(rat_scene.clone()),
+                SceneRoot(high_quality_scene.clone()),
                 Transform::from_xyz(x as f32 / 10.0, y as f32 / 10.0, 0.0)
                     .with_scale(Vec3::splat(1.0)),
                 AnimationGraphHandle(graph_handle.clone()),
                 Rat,
+                ChildOf(spawn_base),
+                // Components for strategy-based LOD system
+                LODState::new(initial_lod),
                 LODDistance::default(),
-                LODState::new(LODLevel::new(0, 0.0, 8.0, 1.0 / 60.0)),
-                AnimationLODData::default(),
+                MeshSwapLODData::default(),
             )
         },
     ));
+}
+
+// System to setup initial animations for all rats
+fn setup_initial_animations(
+    animations: Res<Animations>,
+    mut commands: Commands,
+    query: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+) { 
+    for (_entity, mut player) in query {
+
+         let mut animation_transitions = AnimationTransitions::new();
+        animation_transitions
+            .play(
+                &mut player,
+                animations.node_indices[0],
+                Duration::from_millis(15),
+            )
+            .repeat();
+
+        commands
+            .entity(_entity)
+           .insert(AnimationGraphHandle(animations.graph.clone()))
+           .insert(animation_transitions);
+    }
 }
 
 // System to handle animation based on LOD data
@@ -144,7 +198,7 @@ fn handle_animation_lod(
 }
 
 fn debug_lod_stats(
-    query: Query<(&LODState, &LODDistance, &AnimationLODData), With<Rat>>,
+    query: Query<(&LODState, &LODDistance, Option<&AnimationPlayer>), With<Rat>>,
     time: Res<Time>,
     mut last_print: Local<f32>,
 ) {
@@ -153,17 +207,17 @@ fn debug_lod_stats(
         let mut animated_count = 0;
         let total = query.iter().len();
         
-        for (lod_state, _distance, lod_data) in query.iter() {
+        for (lod_state, _distance, animation_player) in query.iter() {
             let level = lod_state.current_level.level as usize;
             if level < level_counts.len() {
                 level_counts[level] += 1;
             }
-            if lod_data.animation_enabled {
+            if animation_player.is_some() {
                 animated_count += 1;
             }
         }
         
-        println!("\n=== LOD Stats (New System) ===");
+        println!("\n=== LOD Stats (MeshSwap Strategy) ===");
         println!("Total entities: {}", total);
         for (level, count) in level_counts.iter().enumerate() {
             if *count > 0 {
@@ -191,8 +245,8 @@ struct RatAssets {
     rat: Handle<Scene>,
     #[asset(path = "blackrat_furless/rat_without_fur.glb#Scene0")]
     rat_lod0: Handle<Scene>,
-    #[asset(path = "blackrat_furless/rat_without_furlod2.glb#Animation1")]
-    rat_lod0_animation: Handle<Scene>,
+    #[asset(path = "blackrat_furless/rat_without_fur.glb#Animation1")]
+    rat_lod0_animation: Handle<AnimationClip>,
     #[asset(path = "blackrat_free_glb/blackrat.glb#Animation1")]
     animation_clip: Handle<AnimationClip>,
 }
