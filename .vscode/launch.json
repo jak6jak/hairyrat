@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug HairyRat (Debug Build)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/hairyrat.exe",
+            "args": [],
+            "stopOnEntry": false,
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "name": "Debug HairyRat (Release Build)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/hairyrat.exe",
+            "args": [],
+            "stopOnEntry": false,
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"]
+        }
+    ]
+}
