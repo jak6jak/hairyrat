@@ -10,7 +10,7 @@ use iyes_perf_ui::prelude::*;
 
 // Import the new LOD system
 use lod_system::prelude::*;
-use lod_system::strategies::{AnimationLODData, MeshSwapLODConfig, MeshSwapLODData};
+use lod_system::strategies::{MeshSwapLODConfig, HybridLODStrategy, HybridLODConfig, HybridLODData, AnimationLODConfig};
 
 #[derive(Resource)]
 struct Animations {
@@ -27,11 +27,9 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             PanOrbitCameraPlugin,
-            // Performance UI plugin
-            iyes_perf_ui::PerfUiPlugin,
         ))
-        // Use the strategy-based LOD system with MeshSwapLODStrategy
-        .add_plugins(LODPlugin::<Rat, MeshSwapLODStrategy>::default())
+        // Use the hybrid LOD system that combines multiple strategies
+        .add_plugins(LODPlugin::<Rat, HybridLODStrategy>::default())
         .insert_resource(LODLevels::<Rat>::new(create_standard_lod_levels()))
         .init_state::<AppState>()
         .add_loading_state(
@@ -62,29 +60,35 @@ fn setup_scene(
 ) {
     commands.spawn(PerfUiAllEntries::default());
 
-    // Setup MeshSwap LOD configuration with actual scene handles
-    let mesh_swap_config = MeshSwapLODConfig {
-        mesh_handles: vec![
-            // Leave empty since we're using scenes instead
-        ],
-        material_handles: vec![
-            // Leave empty since materials come with scenes
-        ],
-        scene_handles: vec![
-            // Level 0: High quality furry rat
-            rat_assets.rat.clone(),
-            // Level 1: Medium quality - use furless rat
-            rat_assets.rat_lod0.clone(),
-            // Level 2: Low quality - use furless rat again
-            rat_assets.rat_lod0.clone(),
-            // Level 3: Hidden (will be handled by visibility)
-        ],
+    // Setup Hybrid LOD configuration that combines multiple strategies
+    let hybrid_config = HybridLODConfig {
+        animation_config: AnimationLODConfig {
+            high_quality_distance: 10.0,
+            medium_quality_distance: 25.0,
+            low_quality_distance: 50.0,
+        },
+        vat_config: Default::default(), // Not using VAT for now
+        mesh_swap_config: MeshSwapLODConfig {
+            mesh_handles: vec![],
+            material_handles: vec![],
+            scene_handles: vec![
+                // Level 0: High quality furry rat
+                rat_assets.rat.clone(),
+                // Level 1: Medium quality - use furless rat
+                rat_assets.rat_lod0.clone(),
+                // Level 2: Low quality - use furless rat again
+                rat_assets.rat_lod0.clone(),
+                // Level 3: Hidden
+            ],
+        },
+        use_vat_at_level: 99, // Never switch to VAT (you can change this)
     };
-    commands.insert_resource(mesh_swap_config);
+    commands.insert_resource(hybrid_config);
 
-    // Camera setup
+    // Camera setup - position it to see the LOD transitions
     commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+        Transform::from_translation(Vec3::new(0.0, 15.0, 30.0))
+            .looking_at(Vec3::ZERO, Vec3::Y),
         PanOrbitCamera::default(),
         EnvironmentMapLight {
             diffuse_map: env.diffuse_map.clone(),
@@ -120,21 +124,22 @@ fn setup_scene(
     let lod_levels = create_standard_lod_levels();
     let initial_lod = lod_levels[0]; // Start with highest quality
     
-    commands.spawn_batch((0..50).flat_map(|x| (0..50).map(move |y| (x, y))).map(
+    commands.spawn_batch((0..100).flat_map(|x| (0..100).map(move |y| (x, y))).map(
         move |(x, y)| {
             // Start with high quality scene for all entities
             // The LOD system will swap to appropriate scenes based on distance
+            // Spread rats out more to test LOD levels
             (
                 SceneRoot(high_quality_scene.clone()),
-                Transform::from_xyz(x as f32 / 10.0, y as f32 / 10.0, 0.0)
+                Transform::from_xyz((x as f32 - 25.0) / 4.0, (y as f32 - 25.0) / 4.0, 0.0)
                     .with_scale(Vec3::splat(1.0)),
                 AnimationGraphHandle(graph_handle.clone()),
                 Rat,
                 ChildOf(spawn_base),
-                // Components for strategy-based LOD system
+                // Components for hybrid LOD system
                 LODState::new(initial_lod),
                 LODDistance::default(),
-                MeshSwapLODData::default(),
+                HybridLODData::default(),
             )
         },
     ));
@@ -164,14 +169,17 @@ fn setup_initial_animations(
     }
 }
 
-// System to handle animation based on LOD data
+// System to handle animation based on hybrid LOD data
 fn handle_animation_lod(
     animations: Res<Animations>,
     mut commands: Commands,
-    mut query: Query<(Entity, &AnimationLODData, &Children), (With<Rat>, Changed<AnimationLODData>)>,
+    mut query: Query<(Entity, &HybridLODData, &Children), (With<Rat>, Changed<HybridLODData>)>,
     mut animation_players: Query<&mut AnimationPlayer>,
 ) {
-    for (_entity, lod_data, children) in query.iter_mut() {
+    for (_entity, hybrid_lod_data, children) in query.iter_mut() {
+        // Access the animation data from the hybrid strategy
+        let lod_data = &hybrid_lod_data.animation_data;
+        
         // Find animation player in children
         for child in children.iter() {
             if let Ok(mut player) = animation_players.get_mut(child) {
@@ -198,16 +206,17 @@ fn handle_animation_lod(
 }
 
 fn debug_lod_stats(
-    query: Query<(&LODState, &LODDistance, Option<&AnimationPlayer>), With<Rat>>,
+    query: Query<(&LODState, &LODDistance, &HybridLODData, Option<&AnimationPlayer>), With<Rat>>,
     time: Res<Time>,
     mut last_print: Local<f32>,
 ) {
     if time.elapsed_secs() - *last_print > 2.0 {
         let mut level_counts = [0; 4];
         let mut animated_count = 0;
+        let mut strategy_counts = [0; 3]; // Animation, VAT, MeshSwap
         let total = query.iter().len();
         
-        for (lod_state, _distance, animation_player) in query.iter() {
+        for (lod_state, _distance, hybrid_data, animation_player) in query.iter() {
             let level = lod_state.current_level.level as usize;
             if level < level_counts.len() {
                 level_counts[level] += 1;
@@ -215,9 +224,16 @@ fn debug_lod_stats(
             if animation_player.is_some() {
                 animated_count += 1;
             }
+            
+            // Count strategy usage
+            match hybrid_data.current_strategy {
+                lod_system::strategies::LODStrategyType::Animation => strategy_counts[0] += 1,
+                lod_system::strategies::LODStrategyType::VAT => strategy_counts[1] += 1,
+                lod_system::strategies::LODStrategyType::MeshSwap => strategy_counts[2] += 1,
+            }
         }
         
-        println!("\n=== LOD Stats (MeshSwap Strategy) ===");
+        println!("\n=== LOD Stats (Hybrid Strategy) ===");
         println!("Total entities: {}", total);
         for (level, count) in level_counts.iter().enumerate() {
             if *count > 0 {
@@ -232,6 +248,12 @@ fn debug_lod_stats(
                     level_name, level, count, (*count as f32 / total as f32) * 100.0);
             }
         }
+        
+        println!("Strategy Usage:");
+        println!("  Animation: {} ({:.1}%)", strategy_counts[0], (strategy_counts[0] as f32 / total as f32) * 100.0);
+        println!("  VAT:       {} ({:.1}%)", strategy_counts[1], (strategy_counts[1] as f32 / total as f32) * 100.0);
+        println!("  MeshSwap:  {} ({:.1}%)", strategy_counts[2], (strategy_counts[2] as f32 / total as f32) * 100.0);
+        
         println!("Animated: {} / {} ({:.1}% performance saving)", 
             animated_count, total, (1.0 - animated_count as f32 / total as f32) * 100.0);
         

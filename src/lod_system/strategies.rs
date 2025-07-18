@@ -274,11 +274,20 @@ impl LODStrategy for HybridLODStrategy {
         component_data: &mut Self::ComponentData,
     ) {
         // Determine which strategy to use based on LOD level
-        let new_strategy = if to_level < config.use_vat_at_level {
+        let new_strategy = if to_level == 0 {
+            // Level 0: Use animation with high-quality scene
             LODStrategyType::Animation
+        } else if to_level == 1 {
+            // Level 1: Use animation with medium-quality scene (mesh swap)
+            LODStrategyType::MeshSwap
+        } else if to_level < config.use_vat_at_level {
+            // Level 2+: Use mesh swapping for different quality scenes
+            LODStrategyType::MeshSwap
         } else if to_level < 3 {
+            // Optional VAT level (if use_vat_at_level is set low)
             LODStrategyType::VAT
         } else {
+            // Level 3+: Hidden/culled
             LODStrategyType::MeshSwap
         };
         
@@ -298,9 +307,10 @@ impl LODStrategy for HybridLODStrategy {
         
         component_data.current_strategy = new_strategy;
         
-        // Apply new strategy
+        // Apply new strategy (can apply multiple strategies)
         match new_strategy {
             LODStrategyType::Animation => {
+                // Apply animation strategy
                 AnimationLODStrategy::transition(
                     commands,
                     entity,
@@ -309,6 +319,39 @@ impl LODStrategy for HybridLODStrategy {
                     &config.animation_config,
                     &mut component_data.animation_data,
                 );
+                
+                // Always apply mesh swap to ensure correct scene for level 0
+                MeshSwapLODStrategy::transition(
+                    commands,
+                    entity,
+                    from_level,
+                    to_level,
+                    &config.mesh_swap_config,
+                    &mut component_data.mesh_swap_data,
+                );
+            }
+            LODStrategyType::MeshSwap => {
+                // Apply mesh swap strategy
+                MeshSwapLODStrategy::transition(
+                    commands,
+                    entity,
+                    from_level,
+                    to_level,
+                    &config.mesh_swap_config,
+                    &mut component_data.mesh_swap_data,
+                );
+                
+                // Also apply animation strategy for levels that need it
+                if to_level <= 1 {
+                    AnimationLODStrategy::transition(
+                        commands,
+                        entity,
+                        from_level,
+                        to_level,
+                        &config.animation_config,
+                        &mut component_data.animation_data,
+                    );
+                }
             }
             LODStrategyType::VAT => {
                 VATLODStrategy::transition(
@@ -318,16 +361,6 @@ impl LODStrategy for HybridLODStrategy {
                     to_level,
                     &config.vat_config,
                     &mut component_data.vat_data,
-                );
-            }
-            LODStrategyType::MeshSwap => {
-                MeshSwapLODStrategy::transition(
-                    commands,
-                    entity,
-                    from_level,
-                    to_level,
-                    &config.mesh_swap_config,
-                    &mut component_data.mesh_swap_data,
                 );
             }
         }

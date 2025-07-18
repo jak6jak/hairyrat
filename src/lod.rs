@@ -39,8 +39,8 @@ pub struct LODConfig {
 impl Default for LODConfig {
     fn default() -> Self {
         Self {
-            transition_delay: Duration::from_millis(100),
-            max_operations_per_frame: 50,
+            transition_delay: Duration::from_millis(10),
+            max_operations_per_frame: 1150,
         }
     }
 }
@@ -78,7 +78,7 @@ impl<T: LODLevel, E: LODEntity> Plugin for LODPlugin<T, E> {
                 reset_lod_budget::<T, E>,
                 update_distance_from_camera::<T, E>,
                 update_lod::<T, E>,
-                apply_lod_updates::<T, E>,
+                //apply_lod_updates::<T, E>,
             ).chain());
     }
 }
